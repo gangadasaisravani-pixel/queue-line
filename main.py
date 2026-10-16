@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import requests
 
@@ -10,6 +11,15 @@ except ImportError:
     from static.tools import make_queue_entry, list_service_queues
 
 app = FastAPI(title="QueueLess Campus")
+
+# Enable CORS for external frontends (e.g. Vercel deployment)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve the frontend from the static directory
 app.mount("/static", StaticFiles(directory="static"), name="static")

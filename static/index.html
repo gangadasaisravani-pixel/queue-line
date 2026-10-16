@@ -1047,11 +1047,14 @@
                 </div>
 
                 <div class="header-actions">
-                    <div class="status-pill" id="backendStatusPill" title="Connection to local FastAPI backend">
+                    <div class="status-pill" id="backendStatusPill" title="Connection to FastAPI backend">
                         <span class="status-indicator-dot" id="backendDot" aria-hidden="true"></span>
                         <span id="backendStatusText">Connecting...</span>
                     </div>
-                    <a href="/docs" target="_blank" rel="noopener" class="btn-secondary" style="font-size: 0.8rem; padding: 6px 12px;" title="View OpenAPI / Swagger Documentation">
+                    <button id="apiConfigBtn" onclick="openApiConfigModal()" class="btn-secondary" style="font-size: 0.8rem; padding: 6px 12px;" title="Configure Backend API Server (for Vercel deployment)">
+                        ⚙️ Backend API
+                    </button>
+                    <a id="apiDocsLink" href="/docs" target="_blank" rel="noopener" class="btn-secondary" style="font-size: 0.8rem; padding: 6px 12px;" title="View OpenAPI / Swagger Documentation">
                         API Docs ↗
                     </a>
                 </div>
@@ -1266,6 +1269,40 @@
         </div>
     </div>
 
+    <!-- API Base URL Config Modal -->
+    <div class="modal-overlay" id="apiConfigModal" role="dialog" aria-modal="true" aria-labelledby="apiConfigTitle">
+        <div class="modal-card">
+            <button class="modal-close-btn" onclick="closeApiConfigModal()" aria-label="Close dialog">×</button>
+            <div class="modal-header">
+                <span class="category-pill admin">Cloud Integration</span>
+                <h3 id="apiConfigTitle" style="margin-top: 8px;">Backend API Server</h3>
+                <p>Connect this Vercel frontend to your Render FastAPI backend (or leave blank to use the same host).</p>
+            </div>
+
+            <form onsubmit="handleSaveApiConfig(event)">
+                <div class="form-group">
+                    <label for="apiUrlInput" class="form-label">FastAPI Backend URL</label>
+                    <input 
+                        type="text" 
+                        id="apiUrlInput" 
+                        class="form-input" 
+                        placeholder="e.g. https://queue-line.onrender.com" 
+                        autocomplete="url"
+                    >
+                    <div class="input-hint">
+                        <span>Leave empty for same-host deployment</span>
+                        <span id="currentOriginHint"></span>
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-secondary" onclick="resetApiConfig()">Reset</button>
+                    <button type="submit" class="btn-primary">Save & Connect</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Toast Notifications Container -->
     <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
@@ -1283,6 +1320,18 @@
         let campusServices = [];
         let activeTicket = null;
         let activeRosterServiceId = null;
+
+        // Dynamic API Base URL configuration:
+        // Defaults to '' (relative) when backend & frontend are hosted together (e.g. on Render or local)
+        // Can be set to your Render URL (e.g. https://queue-line.onrender.com) when frontend is on Vercel
+        let apiBaseUrl = localStorage.getItem('queueless_api_base') || '';
+
+        function apiUrl(path) {
+            if (!apiBaseUrl) return path;
+            const base = apiBaseUrl.replace(/\/+$/, '');
+            const p = path.startsWith('/') ? path : `/${path}`;
+            return `${base}${p}`;
+        }
 
         // Service icons & descriptions map
         const serviceMetaConfig = {
@@ -1322,6 +1371,7 @@
                 if (e.key === 'Escape') {
                     closeJoinModal();
                     closeRosterModal();
+                    closeApiConfigModal();
                 }
             });
         });
@@ -1331,11 +1381,13 @@
             const statusDot = document.getElementById('backendDot');
             const statusText = document.getElementById('backendStatusText');
             try {
-                const response = await fetch('/');
+                const response = await fetch(apiUrl('/'));
                 if (response.ok) {
                     statusDot.style.backgroundColor = 'var(--status-open)';
                     statusDot.style.boxShadow = '0 0 10px var(--status-open)';
-                    statusText.textContent = 'Backend Connected';
+                    statusText.textContent = apiBaseUrl ? 'Render Connected' : 'Backend Connected';
+                    const docsLink = document.getElementById('apiDocsLink');
+                    if (docsLink) docsLink.href = apiUrl('/docs');
                 } else {
                     throw new Error('Status code: ' + response.status);
                 }
@@ -1343,6 +1395,10 @@
                 statusDot.style.backgroundColor = 'var(--danger)';
                 statusDot.style.boxShadow = '0 0 10px var(--danger)';
                 statusText.textContent = 'Backend Offline';
+
+                if (location.hostname.includes('vercel.app') && !apiBaseUrl) {
+                    showToast('Vercel frontend loaded! Click "⚙️ Backend API" to connect your Render URL.', 'info');
+                }
             }
         }
 
@@ -1356,7 +1412,7 @@
             errorBanner.style.display = 'none';
 
             try {
-                const response = await fetch('/services');
+                const response = await fetch(apiUrl('/services'));
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: Failed to fetch services`);
                 }
@@ -1505,7 +1561,7 @@
             joinBtnText.textContent = 'Joining...';
 
             try {
-                const response = await fetch('/join-queue', {
+                const response = await fetch(apiUrl('/join-queue'), {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1590,7 +1646,7 @@
             refreshBtn.disabled = true;
 
             try {
-                const response = await fetch(`/queue/${activeTicket.service_id}`);
+                const response = await fetch(apiUrl(`/queue/${activeTicket.service_id}`));
                 if (!response.ok) throw new Error('Failed to retrieve queue.');
 
                 const data = await response.json();
@@ -1717,7 +1773,7 @@
             `;
 
             try {
-                const response = await fetch(`/queue/${serviceId}`);
+                const response = await fetch(apiUrl(`/queue/${serviceId}`));
                 if (!response.ok) throw new Error('Could not retrieve queue details.');
 
                 const data = await response.json();
@@ -1801,6 +1857,49 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;');
+        }
+        // API Configuration Modal Handlers
+        function openApiConfigModal() {
+            const input = document.getElementById('apiUrlInput');
+            input.value = apiBaseUrl;
+            document.getElementById('currentOriginHint').textContent = `Current Origin: ${location.origin}`;
+            document.getElementById('apiConfigModal').style.display = 'flex';
+            setTimeout(() => input.focus(), 100);
+        }
+
+        function closeApiConfigModal() {
+            document.getElementById('apiConfigModal').style.display = 'none';
+        }
+
+        function handleSaveApiConfig(e) {
+            e.preventDefault();
+            const input = document.getElementById('apiUrlInput');
+            let val = input.value.trim();
+            if (val) {
+                if (!val.startsWith('http://') && !val.startsWith('https://')) {
+                    val = 'https://' + val;
+                }
+                apiBaseUrl = val.replace(/\/+$/, '');
+                localStorage.setItem('queueless_api_base', apiBaseUrl);
+                showToast(`Backend API set to: ${apiBaseUrl}`, 'success');
+            } else {
+                apiBaseUrl = '';
+                localStorage.removeItem('queueless_api_base');
+                showToast('Reset to default same-host backend', 'info');
+            }
+            closeApiConfigModal();
+            checkBackendHealth();
+            loadServices();
+        }
+
+        function resetApiConfig() {
+            apiBaseUrl = '';
+            localStorage.removeItem('queueless_api_base');
+            document.getElementById('apiUrlInput').value = '';
+            showToast('Reset to default same-host backend', 'info');
+            closeApiConfigModal();
+            checkBackendHealth();
+            loadServices();
         }
     </script>
 </body>
